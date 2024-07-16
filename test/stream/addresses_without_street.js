@@ -1,7 +1,7 @@
 
 const through = require('through2');
 const mapper = require('../../stream/addresses_without_street');
-const Document = require('pelias-model').Document;
+const Document = require('@mft/pelias-model').Document;
 
 module.exports.tests = {};
 

@@ -16,7 +16,7 @@ streams.addressExtractor = require('./address_extractor');
 streams.categoryMapper = require('./category_mapper');
 streams.addendumMapper = require('./addendum_mapper');
 streams.popularityMapper = require('./popularity_mapper');
-streams.dbMapper = require('pelias-model').createDocumentMapperStream;
+streams.dbMapper = require('@mft/pelias-model').createDocumentMapperStream;
 streams.elasticsearch = require('pelias-dbclient');
 
 // default import pipeline

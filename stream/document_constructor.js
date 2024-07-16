@@ -5,7 +5,7 @@
 **/
 
 const through = require('through2');
-const Document = require('pelias-model').Document;
+const Document = require('@mft/pelias-model').Document;
 const peliasLogger = require( 'pelias-logger' ).get( 'openstreetmap' );
 const _ = require('lodash');
 

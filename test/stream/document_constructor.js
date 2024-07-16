@@ -1,7 +1,7 @@
 
 var through = require('through2'),
     constructor = require('../../stream/document_constructor'),
-    Document = require('pelias-model').Document;
+    Document = require('@mft/pelias-model').Document;
 
 module.exports.tests = {};
 

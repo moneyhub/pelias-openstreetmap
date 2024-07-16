@@ -7,3 +7,5 @@ coverage
 
 actual_output.json
 expected_output.json
+
+.npmrc

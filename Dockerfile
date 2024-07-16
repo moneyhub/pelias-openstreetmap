@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y bzip2 unzip && rm -rf /var/lib/apt/list
 ENV WORKDIR /code/pelias/openstreetmap
 WORKDIR ${WORKDIR}
 
+ARG NPM_TOKEN
+ENV NPM_TOKEN=$NPM_TOKEN
+COPY .npmrc ${WORKDIR}
+
 # copy package.json first to prevent npm install being rerun when only code changes
 COPY ./package.json ${WORKDIR}
 RUN npm install
@@ -18,6 +22,8 @@ ADD . ${WORKDIR}
 
 # run tests, clean up LevelDB lockfile
 RUN npm test && rm -rf /tmp/*
+
+RUN rm .npmrc
 
 # run as the pelias user
 USER pelias

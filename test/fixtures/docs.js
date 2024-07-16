@@ -1,5 +1,5 @@
 
-var Document = require('pelias-model').Document;
+var Document = require('@mft/pelias-model').Document;
 var docs = {};
 
 docs.named = new Document('osm','venue', 'item:1');

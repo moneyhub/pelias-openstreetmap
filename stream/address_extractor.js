@@ -27,7 +27,7 @@ var through = require('through2');
 var isObject = require('is-object');
 var extend = require('extend');
 var peliasLogger = require( 'pelias-logger' ).get( 'openstreetmap' );
-var Document = require('pelias-model').Document;
+var Document = require('@mft/pelias-model').Document;
 
 function hasValidAddress( doc ){
   if( !isObject( doc ) ){ return false; }
@@ -116,7 +116,7 @@ module.exports = function(){
 };
 
 // properties to map from the osm record to the pelias doc
-var addrProps = [ 'name', 'number', 'street', 'zip' ];
+var addrProps = ['city', 'name', 'number', 'street', 'zip' ];
 
 // call document setters and ignore non-fatal errors
 function setProperties( record, doc ){

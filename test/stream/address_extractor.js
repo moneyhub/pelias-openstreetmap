@@ -1,7 +1,7 @@
 
 var extractor = require('../../stream/address_extractor');
 var fixtures = require('../fixtures/docs');
-var Document = require('pelias-model').Document;
+var Document = require('@mft/pelias-model').Document;
 var through = require('through2');
 const stream_mock = require('stream-mock');
 

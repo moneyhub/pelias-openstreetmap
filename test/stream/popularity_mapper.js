@@ -1,7 +1,7 @@
 const through = require('through2');
 const mapper = require('../../stream/popularity_mapper');
 const ixtures = require('../fixtures/docs');
-const Document = require('pelias-model').Document;
+const Document = require('@mft/pelias-model').Document;
 const proxyquire = require('proxyquire');
 const peliasConfig = require('pelias-config');
 

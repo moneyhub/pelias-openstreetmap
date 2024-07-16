@@ -2,7 +2,7 @@
 var through = require('through2'),
     mapper = require('../../stream/category_mapper'),
     fixtures = require('../fixtures/docs'),
-    Document = require('pelias-model').Document,
+    Document = require('@mft/pelias-model').Document,
     defaultMapping = require('../../config/category_map');
 
 module.exports.tests = {};
