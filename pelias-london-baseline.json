@@ -1,0 +1,35 @@
+{
+    "logger": {
+      "level": "info"
+    },
+    "dbclient": {
+      "batchSize": 100,
+      "statFrequency": 1000
+    },
+    "esclient": {
+      "apiVersion": "6.8",
+      "hosts": [
+        {
+          "protocol": "http",
+          "host": "localhost",
+          "port": 9203
+        }
+      ],
+      "log": []
+    },
+    "imports": {
+      "adminLookup": {
+        "enabled": false
+      },
+      "openstreetmap": {
+        "datapath": "/Users/ned.davies/Documents/github_repos/pelias-openstreetmap/data",
+        "leveldbpath": "./tmp",
+        "enablePostcodeEnrichment": false,
+        "import": [
+          {
+            "filename": "greater-london-260202.osm.pbf"
+          }
+        ]
+      }
+    }
+  }
