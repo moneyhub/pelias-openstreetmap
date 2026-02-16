@@ -9,6 +9,7 @@ docker-compose up -d
 ```
 
 This starts:
+
 - London Pelias ES on port **9201**
 - UK Pelias ES on port **9202**
 
@@ -21,6 +22,7 @@ docker ps | grep pelias
 ```
 
 You should see:
+
 - `pelias_elasticsearch_london`
 - `pelias_elasticsearch_uk`
 
@@ -33,7 +35,8 @@ You should see:
 ```
 
 This will:
-- Use `pelias-london.json` config (port 9201)
+
+- Use `config/pelias/london.json` config (port 9201)
 - Import `greater-london-260202.osm.pbf`
 - Create log: `import-london.log`
 - Copy config to `~/pelias.json`
@@ -47,7 +50,8 @@ This will:
 ```
 
 This will:
-- Use `pelias-uk.json` config (port 9202)
+
+- Use `config/pelias/uk.json` config (port 9202)
 - Import `united-kingdom-latest.osm.pbf`
 - Create log: `import-uk.log`
 - Copy config to `~/pelias.json`
@@ -202,7 +206,7 @@ node analysis/index.js --pelias-instance london --debug
 
 ## File Locations
 
-- **Configs**: `pelias-london.json`, `pelias-uk.json` (project root)
+- **Configs**: `config/pelias/*.json` (project profiles)
 - **Active Config**: `~/pelias.json` (home directory, auto-updated by reindex.sh)
 - **Import Logs**: `import-london.log`, `import-uk.log` (project root)
 - **Results**: `analysis/evaluation_results/` (JSON files and summary CSV)

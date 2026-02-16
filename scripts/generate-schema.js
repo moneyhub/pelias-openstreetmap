@@ -5,9 +5,25 @@
  * This script outputs the full mapping JSON that can be used to create an index
  * 
  * Based on pelias-schema API: https://github.com/moneyhub/pelias-schema
+ * 
+ * Note: This script requires @mft/pelias-schema which is only available in devDependencies.
+ * In Docker builds (where --production is used), this script will not work.
+ * In pelias-docker, the schema is provided separately and this script is not needed.
  */
 
-const schema = require('@mft/pelias-schema');
+let schema;
+try {
+  schema = require('@mft/pelias-schema');
+} catch (err) {
+  if (err.code === 'MODULE_NOT_FOUND') {
+    console.error('ERROR: @mft/pelias-schema not found.');
+    console.error('This script requires @mft/pelias-schema which is only available in devDependencies.');
+    console.error('In Docker builds, schema generation is handled separately by pelias-docker.');
+    console.error('For local development, run: npm install');
+    process.exit(1);
+  }
+  throw err;
+}
 
 // pelias-schema exports the full index definition (settings + mappings)
 // We'll merge our custom settings with the schema's settings
@@ -52,15 +68,14 @@ if (!indexDefinition.mappings) {
   process.exit(1);
 }
 
-// For ES 6.8.23, we need to wrap mappings in _doc type if not already wrapped
+// For ES 6.8.23, mappings should be at root level (not wrapped in _doc)
+// ES 6.x doesn't support type wrapping in the mapping definition
 const mappings = indexDefinition.mappings;
-if (mappings.properties && !mappings._doc) {
-  // Mappings are at root level, need to wrap in _doc for ES 6.x
-  indexDefinition.mappings = {
-    _doc: mappings
-  };
-} else if (mappings._doc) {
-  // Already wrapped, good - no action needed
+if (mappings._doc) {
+  // If wrapped in _doc, unwrap it for ES 6.8.23
+  indexDefinition.mappings = mappings._doc;
+} else if (mappings.properties) {
+  // Already at root level with properties, good - no action needed
   void 0; // No-op to satisfy linter
 } else {
   console.error('ERROR: Mappings structure is unexpected:', Object.keys(mappings));

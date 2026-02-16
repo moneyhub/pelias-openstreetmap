@@ -6,6 +6,7 @@ set -e
 DATASET="${1:-london}"  # Default to 'london' if not specified
 BASELINE="${2:-false}"  # Default to false (with enrichment)
 POSTCODE_ESTIMATION="${3:-false}"  # Default to false (no postcode estimation)
+CONFIG_DIR="config/pelias"
 
 if [ "$DATASET" != "london" ] && [ "$DATASET" != "uk" ]; then
     echo "ERROR: Dataset must be 'london' or 'uk'"
@@ -13,6 +14,8 @@ if [ "$DATASET" != "london" ] && [ "$DATASET" != "uk" ]; then
     echo "  Examples:"
     echo "    ./reindex.sh london                    # London with postcode enrichment"
     echo "    ./reindex.sh london baseline           # London baseline (no enrichment)"
+    echo "    ./reindex.sh london false postcode_estimation           # London with postcode estimation (fallback mode)"
+    echo "    ./reindex.sh london false postcode_estimation_prelookup  # London with postcode estimation (prelookup mode)"
     echo "    ./reindex.sh uk                        # UK with postcode enrichment"
     echo "    ./reindex.sh uk baseline               # UK baseline (no enrichment)"
     echo "    ./reindex.sh uk false postcode_estimation           # UK with postcode estimation (fallback mode)"
@@ -24,29 +27,37 @@ fi
 if [ "$DATASET" == "london" ]; then
     if [ "$BASELINE" == "baseline" ]; then
         ELASTICSEARCH_HOST="localhost:9203"
-        CONFIG_FILE="pelias-london-baseline.json"
+        CONFIG_FILE="${CONFIG_DIR}/london-baseline.json"
         DATASET_NAME="London (Baseline)"
+    elif [ "$POSTCODE_ESTIMATION" == "postcode_estimation" ]; then
+        ELASTICSEARCH_HOST="localhost:9207"
+        CONFIG_FILE="${CONFIG_DIR}/london-estimation.json"
+        DATASET_NAME="London (with Postcode Estimation - Fallback)"
+    elif [ "$POSTCODE_ESTIMATION" == "postcode_estimation_prelookup" ]; then
+        ELASTICSEARCH_HOST="localhost:9208"
+        CONFIG_FILE="${CONFIG_DIR}/london-estimation-prelookup.json"
+        DATASET_NAME="London (with Postcode Estimation - Prelookup)"
     else
         ELASTICSEARCH_HOST="localhost:9201"
-        CONFIG_FILE="pelias-london.json"
+        CONFIG_FILE="${CONFIG_DIR}/london.json"
         DATASET_NAME="London"
     fi
 else
     if [ "$BASELINE" == "baseline" ]; then
         ELASTICSEARCH_HOST="localhost:9204"
-        CONFIG_FILE="pelias-uk-baseline.json"
+        CONFIG_FILE="${CONFIG_DIR}/uk-baseline.json"
         DATASET_NAME="UK (Baseline)"
     elif [ "$POSTCODE_ESTIMATION" == "postcode_estimation" ]; then
         ELASTICSEARCH_HOST="localhost:9205"
-        CONFIG_FILE="pelias-uk-estimation.json"
+        CONFIG_FILE="${CONFIG_DIR}/uk-estimation.json"
         DATASET_NAME="UK (with Postcode Estimation - Fallback)"
     elif [ "$POSTCODE_ESTIMATION" == "postcode_estimation_prelookup" ]; then
         ELASTICSEARCH_HOST="localhost:9206"
-        CONFIG_FILE="pelias-uk-estimation-prelookup.json"
+        CONFIG_FILE="${CONFIG_DIR}/uk-estimation-prelookup.json"
         DATASET_NAME="UK (with Postcode Estimation - Prelookup)"
     else
         ELASTICSEARCH_HOST="localhost:9202"
-        CONFIG_FILE="pelias-uk.json"
+        CONFIG_FILE="${CONFIG_DIR}/uk.json"
         DATASET_NAME="UK"
     fi
 fi
@@ -81,8 +92,18 @@ else
 fi
 echo ""
 
-echo "Step 3: Generating schema and creating new index..."
-# Generate schema using pelias-schema
+echo "Step 3: Preparing config and generating schema..."
+# First, prepare the config file and remove typeName if it exists
+TEMP_CONFIG=$(mktemp)
+cp "${CONFIG_FILE}" "${TEMP_CONFIG}"
+
+# Remove typeName from schema section if it exists (pelias-schema validation doesn't allow it)
+node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('${TEMP_CONFIG}','utf8'));if(c.schema&&c.schema.typeName)delete c.schema.typeName;fs.writeFileSync('${TEMP_CONFIG}',JSON.stringify(c,null,2));"
+
+# Copy to ~/pelias.json BEFORE generating schema (so pelias-config reads the correct config)
+cp "${TEMP_CONFIG}" ~/pelias.json
+
+# Generate schema using pelias-schema (this will read from ~/pelias.json)
 SCHEMA_JSON=$(node scripts/generate-schema.js)
 
 if [ $? -ne 0 ] || [ -z "$SCHEMA_JSON" ]; then
@@ -103,9 +124,14 @@ else
 fi
 echo ""
 
-echo "Step 4: Preparing config file..."
-TEMP_CONFIG=$(mktemp)
-cp "${CONFIG_FILE}" "${TEMP_CONFIG}"
+echo "Step 4: Finalizing config file..."
+# Reuse TEMP_CONFIG from Step 3, or create new one if needed
+if [ -z "${TEMP_CONFIG}" ] || [ ! -f "${TEMP_CONFIG}" ]; then
+    TEMP_CONFIG=$(mktemp)
+    cp "${CONFIG_FILE}" "${TEMP_CONFIG}"
+    # Remove typeName from schema section if it exists
+    node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('${TEMP_CONFIG}','utf8'));if(c.schema&&c.schema.typeName)delete c.schema.typeName;fs.writeFileSync('${TEMP_CONFIG}',JSON.stringify(c,null,2));"
+fi
 
 # Set postcodeEstimation if requested
 # POSTCODE_ESTIMATION can be: "postcode_estimation" (fallback mode) or "postcode_estimation_prelookup" (prelookup mode)
@@ -124,6 +150,11 @@ else
     node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('${TEMP_CONFIG}','utf8'));if(!c.imports)c.imports={};if(!c.imports.openstreetmap)c.imports.openstreetmap={};c.imports.openstreetmap.postcodeEstimation=false;fs.writeFileSync('${TEMP_CONFIG}',JSON.stringify(c,null,2));"
 fi
 
+# pelias-dbclient no longer requires schema.typeName, so we don't add it back
+# Remove batchSize from dbclient if it exists (pelias-dbclient validation doesn't allow it)
+node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('${TEMP_CONFIG}','utf8'));if(c.dbclient&&c.dbclient.batchSize)delete c.dbclient.batchSize;fs.writeFileSync('${TEMP_CONFIG}',JSON.stringify(c,null,2));"
+
+# Final copy to ~/pelias.json
 cp "${TEMP_CONFIG}" ~/pelias.json
 rm "${TEMP_CONFIG}"
 echo "✓ Copied config to ~/pelias.json"

@@ -19,6 +19,7 @@ docker-compose up -d
 ```
 
 This will start:
+
 - `pelias_elasticsearch_london` on port 9201 (London Pelias data)
 - `pelias_elasticsearch_uk` on port 9202 (UK Pelias data)
 
@@ -51,7 +52,8 @@ docker-compose stop elasticsearch-pelias-london
 ```
 
 This will:
-1. Use `pelias-london.json` config (points to port 9201)
+
+1. Use `config/pelias/london.json` config (points to port 9201)
 2. Import `greater-london-260202.osm.pbf`
 3. Create log file: `import-london.log`
 
@@ -62,7 +64,8 @@ This will:
 ```
 
 This will:
-1. Use `pelias-uk.json` config (points to port 9202)
+
+1. Use `config/pelias/uk.json` config (points to port 9202)
 2. Import `united-kingdom-latest.osm.pbf`
 3. Create log file: `import-uk.log`
 
@@ -89,8 +92,8 @@ node analysis/index.js --store-results --name "external_test" --pelias-instance 
 ## Configuration Files
 
 - `~/pelias.json` - Active config (copied from dataset-specific config during reindex)
-- `pelias-london.json` - London dataset config (port 9201) - stored in project directory
-- `pelias-uk.json` - UK dataset config (port 9202) - stored in project directory
+- `config/pelias/london.json` - London dataset config (port 9201)
+- `config/pelias/uk.json` - UK dataset config (port 9202)
 
 **Note**: Pelias reads configuration from `~/pelias.json` in your home directory. The `reindex.sh` script automatically copies the appropriate config file to `~/pelias.json` before indexing.
 

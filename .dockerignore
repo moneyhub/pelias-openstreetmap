@@ -1,6 +1,31 @@
 .git
 node_modules
 
+# OSM data files (should be mounted as volumes, not included in image)
+data/
+tmp/
+
+# Development/testing files
+analysis/
+
+# Exclude all JSON files (package.json is copied separately in Dockerfile)
+*.json
+# But allow package.json since it's needed (though copied separately)
+!package.json
+
+# Exclude all log files
+*.log
+
+# Exclude all CSV files
+*.csv
+
+# Exclude all README files
+README*
+readme*
+*.md
+!SETUP.md
+!QUICKSTART.md
+
 # large test fixtures
 test/*.pbf
 test/fixtures/combined_vancouver_queens.json

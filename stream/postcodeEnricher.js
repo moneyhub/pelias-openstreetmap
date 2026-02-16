@@ -12,18 +12,112 @@ const http = require('http');
 const peliasLogger = require('pelias-logger').get('openstreetmap');
 const peliasConfig = require('pelias-config').generate();
 
-// Always use port 9200 for external ES (Foursquare/OSM data), regardless of which Pelias instance we're indexing into
-const EXTERNAL_ES_HOST = 'localhost';
-const EXTERNAL_ES_PORT = 9200;
-const EXTERNAL_INDEX = 'geolocation-places';
+// Read external Elasticsearch config from pelias.json
+// Check for both externalElasticsearch and postcodeEnrichment.elasticsearch (pelias-docker format)
+let externalEsConfig = null;
+let externalEsHosts = null;
+let EXTERNAL_ES_HOST = 'localhost';
+let EXTERNAL_ES_PORT = 9201;
+let EXTERNAL_INDEX = 'geolocation-places';
+
+// Debug: Log the full config structure to see what we're getting
+console.log('[postcodeEnricher] Full peliasConfig.imports:', JSON.stringify(peliasConfig.imports, null, 2));
+
+const osmConfig = peliasConfig.imports?.openstreetmap;
+
+// Try to read externalElasticsearch config (preferred format)
+if (osmConfig?.externalElasticsearch) {
+  externalEsConfig = osmConfig.externalElasticsearch;
+  console.log('[postcodeEnricher] ✓ Found externalElasticsearch config:', JSON.stringify(externalEsConfig, null, 2));
+}
+// Try postcodeEnrichment.elasticsearch (pelias-docker format)
+else if (osmConfig?.postcodeEnrichment?.elasticsearch) {
+  externalEsConfig = osmConfig.postcodeEnrichment.elasticsearch;
+  console.log('[postcodeEnricher] ✓ Found postcodeEnrichment.elasticsearch config:', JSON.stringify(externalEsConfig, null, 2));
+  
+  // Also check for index in postcodeEnrichment
+  if (osmConfig.postcodeEnrichment.index) {
+    EXTERNAL_INDEX = osmConfig.postcodeEnrichment.index;
+    console.log('[postcodeEnricher] ✓ Using index from postcodeEnrichment:', EXTERNAL_INDEX);
+  }
+}
+
+// Process the config if we found one
+if (externalEsConfig) {
+  // Read hosts from config
+  if (externalEsConfig.hosts && Array.isArray(externalEsConfig.hosts) && externalEsConfig.hosts.length > 0) {
+    externalEsHosts = externalEsConfig.hosts;
+    EXTERNAL_ES_HOST = externalEsConfig.hosts[0].host || 'localhost';
+    EXTERNAL_ES_PORT = externalEsConfig.hosts[0].port !== undefined ? externalEsConfig.hosts[0].port : 9201;
+    console.log('[postcodeEnricher] ✓ Using external ES hosts:', JSON.stringify(externalEsHosts, null, 2));
+  } else {
+    console.log('[postcodeEnricher] ⚠ Config found but no valid hosts array, using defaults');
+  }
+  
+  // Read index from config if specified (and not already set from postcodeEnrichment)
+  if (externalEsConfig.index && !osmConfig?.postcodeEnrichment?.index) {
+    EXTERNAL_INDEX = externalEsConfig.index;
+    console.log('[postcodeEnricher] ✓ Using index from config:', EXTERNAL_INDEX);
+  }
+} else {
+  console.log('[postcodeEnricher] ⚠ No externalElasticsearch or postcodeEnrichment.elasticsearch config found');
+  console.log('[postcodeEnricher] ⚠ Falling back to esclient config (this should not happen if config is correct)');
+  
+  // Fallback to esclient only if no external config is found
+  if (peliasConfig.esclient && peliasConfig.esclient.hosts && peliasConfig.esclient.hosts.length > 0) {
+    externalEsHosts = peliasConfig.esclient.hosts;
+    EXTERNAL_ES_HOST = peliasConfig.esclient.hosts[0].host || 'localhost';
+    EXTERNAL_ES_PORT = peliasConfig.esclient.hosts[0].port !== undefined ? peliasConfig.esclient.hosts[0].port : 9200;
+    console.log('[postcodeEnricher] ⚠ Using esclient as fallback:', EXTERNAL_ES_HOST, ':', EXTERNAL_ES_PORT);
+  }
+}
+
+console.log('[postcodeEnricher] Final external ES config - Host:', EXTERNAL_ES_HOST, 'Port:', EXTERNAL_ES_PORT, 'Index:', EXTERNAL_INDEX);
 
 const PARTIAL_PC_CHARS = 4;
 const STAGE1_DISTANCE = '100m';
 const NAME_FUZZINESS = 'AUTO';
 const USE_STREET_FILTER = false;
 const BATCH_SIZE = 100;
+const POSTCODE_CANDIDATE_LIMIT = 5;
 const POSTCODE_ESTIMATION_DISTANCE = '1km'; // Distance to search for nearby postcodes
 const PRELOOKUP_ESTIMATION_DISTANCE = '1000m'; // Distance for prelookup estimation mode
+const FULL_UK_POSTCODE_REGEX = /^(GIR\s0AA|[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2})$/;
+const INVALID_POSTCODE_SAMPLE_LIMIT = 10;
+
+function normalizePostcode(postcode) {
+  if (!postcode || typeof postcode !== 'string') {
+    return '';
+  }
+  const compact = postcode.trim().toUpperCase().replace(/\s+/g, '');
+  if (compact.length > 3) {
+    return `${compact.slice(0, -3)} ${compact.slice(-3)}`;
+  }
+  return compact;
+}
+
+function isFullUKPostcode(postcode) {
+  const normalized = normalizePostcode(postcode);
+  return normalized !== '' && FULL_UK_POSTCODE_REGEX.test(normalized);
+}
+
+function selectFirstValidExternalPostcode(hits, context = 'external', onInvalidPostcode = null) {
+  if (!Array.isArray(hits)) {
+    return null;
+  }
+
+  for (const hit of hits) {
+    const postcode = hit?._source?.address?.postcode;
+    if (isFullUKPostcode(postcode)) {
+      return normalizePostcode(postcode);
+    }
+    if (postcode && typeof onInvalidPostcode === 'function') {
+      onInvalidPostcode(postcode, context);
+    }
+  }
+
+  return null;
+}
 
 function buildGeoDistanceFilter(lat, lon, distance) {
   return {
@@ -210,7 +304,7 @@ function extractPostcodeArea(postcode) {
   return '';
 }
 
-function geoFilteredAddress(searchParamsList, distance = '100m') {
+function geoFilteredAddress(searchParamsList, distance = '100m', onInvalidPostcode = null) {
   return new Promise((resolve, reject) => {
     if (!searchParamsList || searchParamsList.length === 0) {
       return resolve([]);
@@ -239,7 +333,7 @@ function geoFilteredAddress(searchParamsList, distance = '100m') {
       
       const queryBody = {
         query: { bool: boolQuery },
-        size: 1
+        size: POSTCODE_CANDIDATE_LIMIT
       };
       
       const sort = buildGeoDistanceSort(lat, lon);
@@ -278,10 +372,10 @@ function geoFilteredAddress(searchParamsList, distance = '100m') {
           const results = [];
           for (const resp of result.responses) {
             const hits = resp.hits?.hits || [];
-            if (hits.length > 0) {
-              const source = hits[0]._source;
+            const selectedPostcode = selectFirstValidExternalPostcode(hits, 'stage2', onInvalidPostcode);
+            if (selectedPostcode) {
               results.push({
-                postcode: source.address?.postcode || null
+                postcode: selectedPostcode
               });
             } else {
               results.push(null);
@@ -303,7 +397,7 @@ function geoFilteredAddress(searchParamsList, distance = '100m') {
   });
 }
 
-function twoStageSearch(searchParamsList) {
+function twoStageSearch(searchParamsList, onInvalidPostcode = null) {
   return new Promise((resolve, reject) => {
     if (!searchParamsList || searchParamsList.length === 0) {
       return resolve([]);
@@ -377,7 +471,7 @@ function twoStageSearch(searchParamsList) {
             filter: filters
           }
         },
-        size: 1
+        size: POSTCODE_CANDIDATE_LIMIT
       };
       
       stage1Lines.push(`{"index": "${EXTERNAL_INDEX}"}`);
@@ -410,10 +504,10 @@ function twoStageSearch(searchParamsList) {
                 const stage1Results = [];
                 for (const resp of result.responses) {
                   const hits = resp.hits?.hits || [];
-                  if (hits.length > 0) {
-                    const source = hits[0]._source;
+                  const selectedPostcode = selectFirstValidExternalPostcode(hits, 'stage1', onInvalidPostcode);
+                  if (selectedPostcode) {
                     stage1Results.push({
-                      postcode: source.address?.postcode || null
+                      postcode: selectedPostcode
                     });
                   } else {
                     stage1Results.push(null);
@@ -453,7 +547,7 @@ function twoStageSearch(searchParamsList) {
         }
         
         const stage2Params = remainingAfterStage1.map(i => searchParamsList[i]);
-        return geoFilteredAddress(stage2Params, STAGE1_DISTANCE)
+        return geoFilteredAddress(stage2Params, STAGE1_DISTANCE, onInvalidPostcode)
           .then((stage2Results) => {
             for (let j = 0; j < remainingAfterStage1.length; j++) {
               const idx = remainingAfterStage1[j];
@@ -468,17 +562,126 @@ function twoStageSearch(searchParamsList) {
   });
 }
 
+function checkExternalElasticsearchConnection() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: EXTERNAL_ES_HOST,
+      port: EXTERNAL_ES_PORT,
+      path: `/${EXTERNAL_INDEX}/_count`,
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const result = JSON.parse(data);
+            resolve({
+              connected: true,
+              documentCount: result.count || 0,
+              index: EXTERNAL_INDEX,
+              host: EXTERNAL_ES_HOST,
+              port: EXTERNAL_ES_PORT
+            });
+          } catch (err) {
+            resolve({
+              connected: true,
+              documentCount: null,
+              index: EXTERNAL_INDEX,
+              host: EXTERNAL_ES_HOST,
+              port: EXTERNAL_ES_PORT,
+              error: 'Failed to parse response'
+            });
+          }
+        } else {
+          resolve({
+            connected: false,
+            error: `HTTP ${res.statusCode}: ${data}`,
+            host: EXTERNAL_ES_HOST,
+            port: EXTERNAL_ES_PORT
+          });
+        }
+      });
+    });
+    
+    req.on('error', (err) => {
+      resolve({
+        connected: false,
+        error: err.message,
+        host: EXTERNAL_ES_HOST,
+        port: EXTERNAL_ES_PORT
+      });
+    });
+    
+    req.setTimeout(5000, () => {
+      req.destroy();
+      resolve({
+        connected: false,
+        error: 'Connection timeout',
+        host: EXTERNAL_ES_HOST,
+        port: EXTERNAL_ES_PORT
+      });
+    });
+    
+    req.end();
+  });
+}
+
 module.exports = function() {
   const enablePostcodeEstimation = peliasConfig.imports?.openstreetmap?.postcodeEstimation === true;
   const estimationMode = peliasConfig.imports?.openstreetmap?.postcodeEstimationMode || 'fallback'; // 'fallback' or 'prelookup'
   
   console.log('[postcodeEnricher] ========================================');
   console.log('[postcodeEnricher] Initializing postcode enricher...');
+  console.log(`[postcodeEnricher] External Elasticsearch: ${EXTERNAL_ES_HOST}:${EXTERNAL_ES_PORT}`);
+  console.log(`[postcodeEnricher] External index: ${EXTERNAL_INDEX}`);
   console.log(`[postcodeEnricher] Postcode estimation: ${enablePostcodeEstimation ? 'ENABLED' : 'DISABLED'}`);
   if (enablePostcodeEstimation) {
     console.log(`[postcodeEnricher] Estimation mode: ${estimationMode}`);
   }
-  console.log('[postcodeEnricher] ========================================');
+  console.log('[postcodeEnricher] Checking external Elasticsearch connection...');
+  
+  checkExternalElasticsearchConnection()
+    .then((stats) => {
+      if (stats.connected) {
+        console.log('[postcodeEnricher] ✓ Successfully connected to external Elasticsearch');
+        console.log(`[postcodeEnricher]   Host: ${stats.host}:${stats.port}`);
+        console.log(`[postcodeEnricher]   Index: ${stats.index}`);
+        if (stats.documentCount !== null) {
+          console.log(`[postcodeEnricher]   Document count: ${stats.documentCount.toLocaleString()}`);
+        }
+        peliasLogger.info('[postcodeEnricher] Successfully connected to external Elasticsearch', {
+          host: stats.host,
+          port: stats.port,
+          index: stats.index,
+          documentCount: stats.documentCount
+        });
+      } else {
+        console.log('[postcodeEnricher] ✗ Failed to connect to external Elasticsearch');
+        console.log(`[postcodeEnricher]   Host: ${stats.host}:${stats.port}`);
+        console.log(`[postcodeEnricher]   Error: ${stats.error}`);
+        peliasLogger.warn('[postcodeEnricher] Failed to connect to external Elasticsearch', {
+          host: stats.host,
+          port: stats.port,
+          error: stats.error
+        });
+      }
+      console.log('[postcodeEnricher] ========================================');
+    })
+    .catch((err) => {
+      console.log('[postcodeEnricher] ✗ Error checking external Elasticsearch connection');
+      console.log(`[postcodeEnricher]   Error: ${err.message}`);
+      peliasLogger.error('[postcodeEnricher] Error checking external Elasticsearch connection', err);
+      console.log('[postcodeEnricher] ========================================');
+    });
+  
   peliasLogger.info('[postcodeEnricher] Initializing postcode enricher...');
   peliasLogger.info(`[postcodeEnricher] Postcode estimation: ${enablePostcodeEstimation ? 'ENABLED' : 'DISABLED'}`);
   if (enablePostcodeEstimation) {
@@ -494,9 +697,33 @@ module.exports = function() {
   let totalNoCoords = 0;
   let totalReceived = 0;
   let totalEstimated = 0;
+  let totalInvalidPostcodes = 0;
   const enrichedSamples = [];
   const notEnrichedSamples = [];
+  const invalidPostcodeSamples = [];
   const LOG_INTERVAL = 10000;
+
+  function recordInvalidPostcodeSample(postcode, context, docId = null) {
+    if (!postcode || typeof postcode !== 'string' || postcode.trim() === '') {
+      return;
+    }
+
+    totalInvalidPostcodes++;
+
+    if (invalidPostcodeSamples.length < INVALID_POSTCODE_SAMPLE_LIMIT) {
+      const sample = {
+        postcode: postcode,
+        context: context,
+        docId: docId
+      };
+      invalidPostcodeSamples.push(sample);
+
+      const msg = `[postcodeEnricher] ⚠ Rejected postcode "${sample.postcode}" ` +
+        `(context: ${sample.context}${sample.docId ? `, doc: ${sample.docId}` : ''})`;
+      console.log(msg);
+      peliasLogger.info(msg);
+    }
+  }
   
   const stream = through.obj(function(doc, enc, next) {
     totalReceived++;
@@ -601,7 +828,7 @@ module.exports = function() {
                 }
               } else {
                 if (totalEstimated <= 10) {
-                  console.log(`[postcodeEnricher] [PRELOCKUP] Found postcode "${estimatedPostcode}" but couldn't extract area`);
+                  console.log(`[postcodeEnricher] [PRELOOCKUP] Found postcode "${estimatedPostcode}" but couldn't extract area`);
                 }
               }
             } else {
@@ -636,7 +863,7 @@ module.exports = function() {
           return params;
         });
         
-        return twoStageSearch(searchParams);
+        return twoStageSearch(searchParams, recordInvalidPostcodeSample);
       })
       .then((results) => {
         // MODE 1 (fallback): If external ES search failed, estimate postcode from Pelias
@@ -646,17 +873,20 @@ module.exports = function() {
           if (!result && item.params.needsFallbackEstimation && enablePostcodeEstimation) {
             return queryPeliasForClosestPostcode(item.params.latitude, item.params.longitude)
               .then((estimatedPostcode) => {
-                if (estimatedPostcode) {
+                if (isFullUKPostcode(estimatedPostcode)) {
+                  const normalizedEstimatedPostcode = normalizePostcode(estimatedPostcode);
                   // Use the estimated postcode directly (fallback mode)
-                  results[idx] = { postcode: estimatedPostcode };
+                  results[idx] = { postcode: normalizedEstimatedPostcode };
                   totalEstimated++;
                   if (totalEstimated <= 3) {
                     console.log(
-                      `[postcodeEnricher] [FALLBACK] Estimated postcode "${estimatedPostcode}" ` +
+                      `[postcodeEnricher] [FALLBACK] Estimated postcode "${normalizedEstimatedPostcode}" ` +
                       `from nearby record (within ${POSTCODE_ESTIMATION_DISTANCE}) ` +
                       `for record ${item.doc.getId()}`
                     );
                   }
+                } else if (estimatedPostcode) {
+                  recordInvalidPostcodeSample(estimatedPostcode, 'fallback-estimation', item.doc.getId());
                 }
                 return null;
               })
@@ -678,9 +908,10 @@ module.exports = function() {
           processedCount++;
           totalProcessed++;
           
-          if (result && result.postcode) {
+          if (result && isFullUKPostcode(result.postcode)) {
+            const normalizedPostcode = normalizePostcode(result.postcode);
             const oldPostcode = doc.getAddress('zip') || '(none)';
-            doc.setAddress('zip', result.postcode);
+            doc.setAddress('zip', normalizedPostcode);
             const verifyPostcode = doc.getAddress('zip');
             
             enrichedCount++;
@@ -691,7 +922,7 @@ module.exports = function() {
                 id: doc.getId(),
                 name: doc.getName('default') || 'N/A',
                 oldPostcode: oldPostcode,
-                newPostcode: result.postcode,
+                newPostcode: normalizedPostcode,
                 verifiedPostcode: verifyPostcode,
                 lat: doc.getCentroid()?.lat,
                 lon: doc.getCentroid()?.lon
@@ -703,13 +934,16 @@ module.exports = function() {
               const docZip = docAddressParts.zip || '(not in address_parts)';
               console.log(
                 `[postcodeEnricher] ✓ ENRICHED #${totalEnriched}: ID=${doc.getId()}, ` +
-                `Name="${doc.getName('default') || 'N/A'}", Old="${oldPostcode}" → New="${result.postcode}" ` +
+                `Name="${doc.getName('default') || 'N/A'}", Old="${oldPostcode}" → New="${normalizedPostcode}" ` +
                 `(verified: ${verifyPostcode}, doc.address_parts.zip: ${docZip})`
               );
             }
             
             this.push(doc);
           } else {
+            if (result && result.postcode) {
+              recordInvalidPostcodeSample(result.postcode, 'final-guard', doc.getId());
+            }
             if (notEnrichedSamples.length < 5) {
               notEnrichedSamples.push({
                 id: doc.getId(),
@@ -768,6 +1002,9 @@ module.exports = function() {
     if (enablePostcodeEstimation) {
       console.log(`[postcodeEnricher]   Postcode areas estimated: ${totalEstimated}`);
     }
+    if (totalInvalidPostcodes > 0) {
+      console.log(`[postcodeEnricher]   Invalid postcode candidates rejected: ${totalInvalidPostcodes}`);
+    }
     console.log('[postcodeEnricher] ========================================');
     console.log('');
     
@@ -785,6 +1022,9 @@ module.exports = function() {
     peliasLogger.info(`[postcodeEnricher]   Success rate: ${successRate}%`);
     if (enablePostcodeEstimation) {
       peliasLogger.info(`[postcodeEnricher]   Postcode areas estimated: ${totalEstimated}`);
+    }
+    if (totalInvalidPostcodes > 0) {
+      peliasLogger.info(`[postcodeEnricher]   Invalid postcode candidates rejected: ${totalInvalidPostcodes}`);
     }
     peliasLogger.info(`[postcodeEnricher] ========================================`);
     
@@ -810,6 +1050,17 @@ module.exports = function() {
       console.log('[postcodeEnricher] Sample of records not enriched:');
       notEnrichedSamples.forEach((sample, idx) => {
         const msg = `  ${idx + 1}. ID: ${sample.id}, Name: "${sample.name}", Lat: ${sample.lat}, Lon: ${sample.lon}`;
+        console.log(msg);
+        peliasLogger.info(msg);
+      });
+    }
+
+    if (invalidPostcodeSamples.length > 0) {
+      console.log('');
+      console.log('[postcodeEnricher] Sample of rejected postcode candidates:');
+      invalidPostcodeSamples.forEach((sample, idx) => {
+        const msg = `  ${idx + 1}. Postcode: "${sample.postcode}", Context: ${sample.context}` +
+          `${sample.docId ? `, Doc: ${sample.docId}` : ''}`;
         console.log(msg);
         peliasLogger.info(msg);
       });

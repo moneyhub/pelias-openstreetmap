@@ -35,7 +35,6 @@
   },
   "dependencies": {
     "@mft/pelias-model": "^10.1.0-mft",
-    "@mft/pelias-schema": "git+https://github.com/moneyhub/pelias-schema.git#master",
     "async": "^3.0.1",
     "combined-stream": "^1.0.5",
     "extend": "^3.0.0",
@@ -53,6 +52,7 @@
     "through2-sink": "^1.0.0"
   },
   "devDependencies": {
+    "@mft/pelias-schema": "git+https://github.com/moneyhub/pelias-schema.git#master",
     "colors": "^1.1.2",
     "deep-diff": "^1.0.0",
     "istanbul": "^0.4.3",
