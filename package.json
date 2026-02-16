@@ -52,6 +52,7 @@
     "through2-sink": "^1.0.0"
   },
   "devDependencies": {
+    "@mft/pelias-schema": "git+https://github.com/moneyhub/pelias-schema.git#master",
     "colors": "^1.1.2",
     "deep-diff": "^1.0.0",
     "istanbul": "^0.4.3",

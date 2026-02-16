@@ -15,13 +15,15 @@ COPY .npmrc ${WORKDIR}
 
 # copy package.json first to prevent npm install being rerun when only code changes
 COPY ./package.json ${WORKDIR}
-RUN npm install
+# Install only production dependencies (excludes devDependencies like pelias-schema)
+RUN npm install --production
 
 # add local code
 ADD . ${WORKDIR}
 
-# run tests, clean up LevelDB lockfile
-RUN npm test && rm -rf /tmp/*
+# Skip tests in Docker (devDependencies not installed, and tests run in CI/local)
+# Clean up LevelDB lockfile
+RUN rm -rf /tmp/*
 
 RUN rm .npmrc
 

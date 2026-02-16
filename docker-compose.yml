@@ -1,0 +1,174 @@
+services:
+  # Pelias Elasticsearch for London data
+  elasticsearch-pelias-london:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_london
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_london_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for UK data
+  elasticsearch-pelias-uk:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_uk
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ports:
+      - "9202:9200"
+    volumes:
+      - es_uk_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for London data (baseline - no postcode enrichment)
+  elasticsearch-pelias-london-baseline:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_london_baseline
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9203:9200"
+    volumes:
+      - es_london_baseline_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for UK data (baseline - no postcode enrichment)
+  elasticsearch-pelias-uk-baseline:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_uk_baseline
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ports:
+      - "9204:9200"
+    volumes:
+      - es_uk_baseline_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for UK data (with postcode estimation - fallback mode)
+  elasticsearch-pelias-uk-estimation:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_uk_estimation
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ports:
+      - "9205:9200"
+    volumes:
+      - es_uk_estimation_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for UK data (with postcode estimation - prelookup mode)
+  elasticsearch-pelias-uk-estimation-prelookup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_uk_estimation_prelookup
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ports:
+      - "9206:9200"
+    volumes:
+      - es_uk_estimation_prelookup_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for London data (with postcode estimation - fallback mode)
+  elasticsearch-pelias-london-estimation:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_london_estimation
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9207:9200"
+    volumes:
+      - es_london_estimation_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+  # Pelias Elasticsearch for London data (with postcode estimation - prelookup mode)
+  elasticsearch-pelias-london-estimation-prelookup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.23
+    container_name: pelias_elasticsearch_london_estimation_prelookup
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9208:9200"
+    volumes:
+      - es_london_estimation_prelookup_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - pelias-network
+
+volumes:
+  es_london_data:
+    driver: local
+  es_uk_data:
+    driver: local
+  es_london_baseline_data:
+    driver: local
+  es_uk_baseline_data:
+    driver: local
+  es_uk_estimation_data:
+    driver: local
+  es_uk_estimation_prelookup_data:
+    driver: local
+  es_london_estimation_data:
+    driver: local
+  es_london_estimation_prelookup_data:
+    driver: local
+
+networks:
+  pelias-network:
+    driver: bridge
